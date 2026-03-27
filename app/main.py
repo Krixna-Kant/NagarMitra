@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.routes.aqi import router as aqi_router
+from app.routes.ml import router as ml_router
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -23,15 +24,15 @@ logger = logging.getLogger("nagarmitra")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("NagarMitra Phase 1 - AQI Intelligence Service starting...")
+    logger.info("NagarMitra Phase 2 - ML Intelligence Service starting...")
     yield
     logger.info("NagarMitra shutting down.")
 
 
 app = FastAPI(
-    title="NagarMitra API - Phase 1",
-    description="Ward-level AQI intelligence for Delhi: live data, source attribution, health advisories",
-    version="1.0.0",
+    title="NagarMitra API - Phase 1 & 2",
+    description="Ward-level AQI intelligence for Delhi: live data, source attribution, health advisories, and ML Forecasting",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -45,6 +46,7 @@ app.add_middleware(
 )
 
 app.include_router(aqi_router)
+app.include_router(ml_router)
 
 
 @app.get("/")

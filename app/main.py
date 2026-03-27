@@ -1,5 +1,5 @@
 """
-NagarMitra - Phase 1
+NagarMitra - Phase 1, 2 & 4
 FastAPI Application Entry Point
 """
 
@@ -16,6 +16,8 @@ load_dotenv()
 from app.routes.aqi import router as aqi_router
 from app.routes.ml import router as ml_router
 from app.routes.admin import router as admin_router
+from app.bot.telegram_webhook import router as telegram_router
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -40,7 +42,7 @@ app = FastAPI(
 # CORS for React frontend (Allowing all for Hackathon flexibility)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,12 +51,14 @@ app.add_middleware(
 app.include_router(aqi_router)
 app.include_router(ml_router)
 app.include_router(admin_router)
+app.include_router(telegram_router)
+
 
 @app.get("/")
 async def root():
     return {
         "project":  "NagarMitra",
-        "phase":    "Phase 1 - AQI Intelligence",
+        "phase":    "Phase 1, 2 & 4 - AQI Intelligence + ML + Admin",
         "status":   "running",
         "docs":     "/docs",
         "endpoints": {

@@ -15,6 +15,7 @@ load_dotenv()
 
 from app.routes.aqi import router as aqi_router
 from app.routes.ml import router as ml_router
+from app.routes.admin import router as admin_router
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -30,9 +31,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="NagarMitra API - Phase 1 & 2",
-    description="Ward-level AQI intelligence for Delhi: live data, source attribution, health advisories, and ML Forecasting",
-    version="2.0.0",
+    title="NagarMitra API - Phase 1, 2 & 4",
+    description="Live Ward AQI, Source Attribution, AI Forecasting, and Admin Dashboard What-If Simulations.",
+    version="4.0.0",
     lifespan=lifespan,
 )
 
@@ -47,7 +48,7 @@ app.add_middleware(
 
 app.include_router(aqi_router)
 app.include_router(ml_router)
-
+app.include_router(admin_router)
 
 @app.get("/")
 async def root():

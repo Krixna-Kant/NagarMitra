@@ -102,12 +102,17 @@ async def get_ward_aqi_endpoint(
         lang      = lang,
     )
 
+    # Actionable Civic Policies (Phase 4 integration)
+    from app.services.policy_engine import get_policies_for_source
+    policies = get_policies_for_source(attribution.get("primary_source", "unknown"))
+
     return {
         "ward":        ward_name,
         "aqi_data":    ward_data,
         "weather":     weather,
         "attribution": attribution,
         "advisory":    advisory,
+        "actionable_policies": policies
     }
 
 

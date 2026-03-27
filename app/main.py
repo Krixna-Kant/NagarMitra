@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from app.bot.telegram_webhook import router as telegram_router
 
 load_dotenv()
 
@@ -52,6 +53,7 @@ app.add_middleware(
 
 app.include_router(aqi_router)
 app.include_router(routes_router)
+app.include_router(telegram_router)
 
 
 @app.get("/")

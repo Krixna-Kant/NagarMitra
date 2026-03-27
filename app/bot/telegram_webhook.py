@@ -7,8 +7,10 @@ dispatches free-text to the LangGraph ward agent.
 import os
 import logging
 import math
+import re
 import time
 from typing import Optional
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, Request
@@ -23,12 +25,23 @@ router = APIRouter(tags=["Telegram Bot"])
 BOT_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 INTERNAL_API = "http://127.0.0.1:8000"
+TOMTOM_API_KEY = os.getenv("TOMTOM_API_KEY", "")
+ROUTE_UI_BASE_URL = os.getenv("ROUTE_UI_BASE_URL", "https://theuilink.com")
 
 # ─── Alert throttling ─────────────────────────────────────────────────────────
 # {user_id: {"ward": str, "alerted_at": float}}
 _last_alert: dict[int, dict] = {}
 ALERT_COOLDOWN_SECONDS = 300   # 5 min — don't re-alert same ward within this
 AQI_ALERT_THRESHOLD    = 150   # AQI above this triggers a proactive alert
+DEFAULT_ROUTE_PROFILE  = "driving"
+
+# {user_id: {"latitude": float, "longitude": float, "chat_id": int, "updated_at": float}}
+_last_known_location: dict[int, dict] = {}
+ROUTE_INTENT_PATTERN = re.compile(
+    r"(?:go to|going to|route to|navigate to|directions to|reach|head to|take me to)\s+(.+)",
+    flags=re.IGNORECASE,
+)
+ROUTE_KEYWORDS = ("route", "directions", "navigate", "go to", "reach", "take me")
 
 
 # ─── Geospatial helpers ───────────────────────────────────────────────────────
@@ -73,6 +86,162 @@ def _safe(text: str) -> str:
         return ""
     # Replace chars that break Telegram Markdown v1
     return str(text).replace("*", "").replace("_", "").replace("`", "").replace("[", "(").replace("]", ")")
+
+
+def _remember_user_location(user_id: int, chat_id: int, lat: float, lon: float):
+    _last_known_location[user_id] = {
+        "latitude": lat,
+        "longitude": lon,
+        "chat_id": chat_id,
+        "updated_at": time.time(),
+    }
+
+
+def _extract_destination_query(text: str) -> Optional[str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return None
+
+    match = ROUTE_INTENT_PATTERN.search(cleaned)
+    if match:
+        destination = match.group(1).strip(" .!?")
+        return destination or None
+
+    # Fallback: support messages that are only destination + route keyword.
+    lowered = cleaned.lower()
+    if any(keyword in lowered for keyword in ROUTE_KEYWORDS):
+        parts = re.split(r"\broute\b|\bdirections\b|\bnavigate\b", cleaned, flags=re.IGNORECASE)
+        if parts:
+            candidate = parts[-1].strip(" .!?")
+            if candidate and len(candidate) > 2:
+                return candidate
+    return None
+
+
+def _infer_profile_from_text(text: str) -> str:
+    lowered = (text or "").lower()
+    if any(token in lowered for token in ("walk", "walking", "on foot")):
+        return "walking"
+    if any(token in lowered for token in ("bike", "bicycle", "cycling", "cycle")):
+        return "cycling"
+    return DEFAULT_ROUTE_PROFILE
+
+
+def _is_route_request(text: str) -> bool:
+    lowered = (text or "").lower()
+    if "go to " in lowered or "navigate to " in lowered or "directions to " in lowered:
+        return True
+    return any(keyword in lowered for keyword in ROUTE_KEYWORDS)
+
+
+def _normalize_tomtom_result(item: dict) -> Optional[dict]:
+    position = item.get("position", {})
+    lat = position.get("lat")
+    lon = position.get("lon")
+    if lat is None or lon is None:
+        return None
+    address = item.get("address", {})
+    return {
+        "latitude": float(lat),
+        "longitude": float(lon),
+        "display_name": (
+            address.get("freeformAddress")
+            or item.get("poi", {}).get("name")
+            or f"{lat}, {lon}"
+        ),
+    }
+
+
+def _normalize_nominatim_result(item: dict) -> Optional[dict]:
+    lat = item.get("lat")
+    lon = item.get("lon")
+    if lat is None or lon is None:
+        return None
+    return {
+        "latitude": float(lat),
+        "longitude": float(lon),
+        "display_name": item.get("display_name", f"{lat}, {lon}"),
+    }
+
+
+async def _search_place_candidates(query: str, limit: int = 6) -> list[dict]:
+    query = (query or "").strip()
+    if not query:
+        return []
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        if TOMTOM_API_KEY:
+            tomtom_url = f"https://api.tomtom.com/search/2/search/{quote(query)}.json"
+            try:
+                tt_resp = await client.get(
+                    tomtom_url,
+                    params={"key": TOMTOM_API_KEY, "limit": limit, "language": "en-IN"},
+                    headers={"Accept": "application/json"},
+                )
+                if tt_resp.status_code == 200:
+                    payload = tt_resp.json()
+                    items = []
+                    for raw in payload.get("results", []):
+                        normalized = _normalize_tomtom_result(raw)
+                        if normalized:
+                            items.append(normalized)
+                    if items:
+                        return items
+            except Exception as exc:
+                logger.warning(f"[route_search] TomTom search failed: {exc}")
+
+        fallback_url = "https://nominatim.openstreetmap.org/search"
+        fallback_resp = await client.get(
+            fallback_url,
+            params={
+                "format": "jsonv2",
+                "addressdetails": 1,
+                "limit": limit,
+                "q": query,
+            },
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "NagarMitraBot/1.0",
+            },
+        )
+        if fallback_resp.status_code != 200:
+            return []
+        data = fallback_resp.json()
+        return [x for x in (_normalize_nominatim_result(raw) for raw in data) if x]
+
+
+def _pick_closest_candidate(origin_lat: float, origin_lon: float, candidates: list[dict]) -> Optional[dict]:
+    if not candidates:
+        return None
+    ranked = sorted(
+        candidates,
+        key=lambda item: _haversine_km(origin_lat, origin_lon, item["latitude"], item["longitude"]),
+    )
+    best = ranked[0]
+    best["distance_from_origin_km"] = round(
+        _haversine_km(origin_lat, origin_lon, best["latitude"], best["longitude"]),
+        2,
+    )
+    return best
+
+
+def _build_route_ui_link(
+    origin_lat: float,
+    origin_lon: float,
+    destination_lat: float,
+    destination_lon: float,
+    profile: str,
+) -> str:
+    params = urlencode(
+        {
+            "from": f"{origin_lat:.6f},{origin_lon:.6f}",
+            "to": f"{destination_lat:.6f},{destination_lon:.6f}",
+            # Keep both keys for compatibility with external UI integrations.
+            "profiling": profile,
+            "profile": profile,
+        }
+    )
+    return f"{ROUTE_UI_BASE_URL}?{params}"
 
 
 # ─── Telegram helpers ─────────────────────────────────────────────────────────
@@ -136,6 +305,7 @@ async def handle_start(chat_id: int, first_name: str):
         "*How to use:*\n"
         "• Ask naturally: _What's the AQI in Rohini?_\n"
         "• Or: _Air quality near Connaught Place_\n\n"
+        "🧭 Need routes? Ask: _I want to go to DLF CyberHub_ (after sharing location).\n\n"
         "📍 Share your *live location* and I'll alert you whenever you enter a high-pollution zone.\n\n"
         "Use /wards to see all supported areas.\n"
         "Use /location to share your live location.\n\n"
@@ -157,6 +327,9 @@ async def handle_help(chat_id: int):
         "— _AQI in Rohini_\n"
         "— _What's the air quality near Hauz Khas?_\n"
         "— _Is Anand Vihar polluted today?_\n\n"
+        "For route guidance:\n"
+        "— _I want to go to DLF CyberHub_\n"
+        "(_share location first using /location_)\n\n"
         "Commands:\n"
         "/start — Welcome message\n"
         "/wards — List all supported wards\n"
@@ -180,6 +353,7 @@ async def handle_location_cmd(chat_id: int):
 
 async def handle_location_update(chat_id: int, user_id: int, lat: float, lon: float, is_live: bool):
     """Find nearest ward, fetch AQI, alert if above threshold."""
+    _remember_user_location(user_id=user_id, chat_id=chat_id, lat=lat, lon=lon)
     ward_name, dist_km = nearest_ward(lat, lon)
 
     if dist_km > 20:
@@ -248,6 +422,114 @@ async def handle_location_update(chat_id: int, user_id: int, lat: float, lon: fl
         await send_message(chat_id, msg)
 
 
+async def handle_route_request(chat_id: int, user_id: int, text: str):
+    location = _last_known_location.get(user_id)
+    if not location:
+        await request_location_keyboard(
+            chat_id,
+            "📍 I can plan your best route, but I need your *current location* first.\n\n"
+            "Tap below and share location, then ask again like:\n"
+            "_I want to go to DLF CyberHub_",
+        )
+        return
+
+    destination_query = _extract_destination_query(text)
+    if not destination_query:
+        await send_message(
+            chat_id,
+            "🧭 Tell me your destination like:\n"
+            "_I want to go to DLF CyberHub_",
+        )
+        return
+
+    profile = _infer_profile_from_text(text)
+    origin_lat = location["latitude"]
+    origin_lon = location["longitude"]
+
+    try:
+        candidates = await _search_place_candidates(destination_query, limit=6)
+    except Exception as exc:
+        logger.error(f"[handle_route_request] destination search failed: {exc}")
+        await send_message(chat_id, "⚠️ I couldn't search destinations right now. Please try again.")
+        return
+
+    best_destination = _pick_closest_candidate(origin_lat, origin_lon, candidates)
+    if not best_destination:
+        await send_message(
+            chat_id,
+            f"⚠️ I couldn't find a close match for *{_safe(destination_query)}*.\n"
+            "Try a more specific place name.",
+        )
+        return
+
+    compare_payload = {
+        "origin": {"latitude": origin_lat, "longitude": origin_lon},
+        "destination": {
+            "latitude": best_destination["latitude"],
+            "longitude": best_destination["longitude"],
+        },
+        "profile": profile,
+        "corridor_radius_km": 2.0,
+        "sample_step_km": 2.0,
+        "max_routes": 3,
+        "preference_alpha": 0.4,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=80) as client:
+            resp = await client.post(f"{INTERNAL_API}/api/v1/routes/compare", json=compare_payload)
+            if resp.status_code != 200:
+                await send_message(chat_id, "⚠️ Route service is busy. Please try again in a minute.")
+                return
+            compare_data = resp.json()
+    except Exception as exc:
+        logger.error(f"[handle_route_request] compare API failed: {exc}")
+        await send_message(chat_id, "⚠️ Unable to compute route right now. Please try again.")
+        return
+
+    routes = compare_data.get("routes", [])
+    recommendation = compare_data.get("recommendation", {})
+    preferred_route_id = recommendation.get("preferred_route_id")
+    recommended_route = next(
+        (route for route in routes if route.get("route_id") == preferred_route_id),
+        routes[0] if routes else None,
+    )
+    if not recommended_route:
+        await send_message(chat_id, "⚠️ I couldn't build route options for this trip. Please try another destination.")
+        return
+
+    duration_min = round(float(recommended_route.get("duration_sec", 0.0)) / 60.0, 1)
+    distance_km = round(float(recommended_route.get("distance_m", 0.0)) / 1000.0, 2)
+    pollution = recommended_route.get("pollution", {})
+    pollution_score = pollution.get("score")
+    avg_aqi = pollution.get("avg_predicted_aqi") or pollution.get("avg_aqi")
+    pollution_score_label = pollution_score if pollution_score is not None else "n/a"
+    avg_aqi_label = avg_aqi if avg_aqi is not None else "n/a"
+    reason = _safe(recommended_route.get("recommendation_reason", "Best balance of time and air quality."))
+    destination_label = _safe(best_destination.get("display_name", destination_query))
+    recommendation_summary = _safe(recommendation.get("summary", "Recommended based on travel time and pollution exposure."))
+    ui_link = _build_route_ui_link(
+        origin_lat=origin_lat,
+        origin_lon=origin_lon,
+        destination_lat=best_destination["latitude"],
+        destination_lon=best_destination["longitude"],
+        profile=profile,
+    )
+
+    msg = (
+        f"✅ I found the *best possible route* to *{destination_label}*.\n\n"
+        f"🚗 Mode: *{profile.title()}*\n"
+        f"🛣 Route: *{recommended_route.get('route_id', 'route_1').upper()}* (recommended)\n"
+        f"⏱ ETA: *{duration_min} min* · 📏 Distance: *{distance_km} km*\n"
+        f"🌫 Avg AQI: *{avg_aqi_label}* · Pollution score: *{pollution_score_label}*\n"
+        f"📍 Destination match is ~{best_destination.get('distance_from_origin_km', '?')} km from your shared location\n\n"
+        f"{recommendation_summary}\n"
+        f"Why this route: {reason}\n\n"
+        f"🔗 Open full route UI (all alternatives):\n{ui_link}"
+    )
+    await send_message(chat_id, msg)
+
+
 # ─── Webhook Endpoint ─────────────────────────────────────────────────────────
 
 @router.post("/webhook")
@@ -264,6 +546,7 @@ async def telegram_webhook(req: Request):
         chat_id  = edited["chat"]["id"]
         user_id  = edited.get("from", {}).get("id", chat_id)
         loc      = edited["location"]
+        _remember_user_location(user_id, chat_id, loc["latitude"], loc["longitude"])
         await handle_location_update(
             chat_id, user_id,
             loc["latitude"], loc["longitude"],
@@ -282,6 +565,7 @@ async def telegram_webhook(req: Request):
     # ── One-shot OR initial live location share ──
     if "location" in message:
         loc = message["location"]
+        _remember_user_location(user_id, chat_id, loc["latitude"], loc["longitude"])
         await send_typing(chat_id)
         live_period = loc.get("live_period")  # present = live share, absent = one-shot
         if live_period:
@@ -338,6 +622,12 @@ async def telegram_webhook(req: Request):
 
     if text.startswith("/help"):
         await handle_help(chat_id)
+        return {"ok": True}
+
+    # ── Route planning intent ──
+    if _is_route_request(text):
+        await send_typing(chat_id)
+        await handle_route_request(chat_id, user_id, text)
         return {"ok": True}
 
     # ── Natural language location intent ──

@@ -1,0 +1,288 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, Arial, sans-serif;
+  color: #132236;
+  background: #f3f6fb;
+  overflow: hidden;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 390px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.controls {
+  height: 100vh;
+  padding: 16px;
+  background: #ffffff;
+  border-right: 1px solid #d6deea;
+  overflow-y: auto;
+}
+
+.controls h1 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.muted {
+  color: #5c6e82;
+  font-size: 0.9rem;
+}
+
+form {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+label {
+  display: grid;
+  gap: 5px;
+  font-size: 0.86rem;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+}
+
+input,
+select,
+button {
+  font-size: 0.95rem;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #c5d0de;
+}
+
+.search-box {
+  position: relative;
+}
+
+.suggestions {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #d6deea;
+  border-radius: 8px;
+  z-index: 3000;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.08);
+  display: none;
+}
+
+.suggestions.show {
+  display: block;
+}
+
+.suggestions li {
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #edf2f8;
+  cursor: pointer;
+}
+
+.suggestions li:last-child {
+  border-bottom: none;
+}
+
+.suggestions li:hover {
+  background: #f2f7ff;
+}
+
+button {
+  cursor: pointer;
+  border: 0;
+  color: white;
+  font-weight: 600;
+  background: #0f62fe;
+}
+
+button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.status {
+  margin-top: 10px;
+  font-size: 0.85rem;
+  color: #334e68;
+}
+
+.legend {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #e0e7f0;
+  border-radius: 10px;
+  background: #fffaf4;
+  font-size: 0.84rem;
+}
+
+.legend-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.legend-dot.moderate {
+  background: #ff8f00;
+}
+
+.legend-dot.high {
+  background: #d32f2f;
+}
+
+.legend-dot.traffic-low {
+  background: #1e88e5;
+}
+
+.legend-dot.traffic-mid {
+  background: #e87b3d;
+}
+
+.legend-dot.traffic-high {
+  background: #a50704;
+}
+
+.legend-dot.traffic-closed {
+  background: #fdd835;
+}
+
+.recommendation {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #e7f3ff;
+  font-size: 0.9rem;
+}
+
+.route-cards {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.route-card {
+  border-radius: 10px;
+  border: 1px solid #d6deea;
+  padding: 10px;
+  background: #fafcff;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.route-card:hover {
+  border-color: #9cb4d4;
+}
+
+.route-card.active {
+  border-color: #1668e3;
+  box-shadow: 0 0 0 2px rgba(22, 104, 227, 0.15);
+}
+
+.route-card h3 {
+  margin: 0 0 6px;
+  font-size: 0.96rem;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  margin-top: 6px;
+  font-size: 0.84rem;
+}
+
+.seg-list {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: #334e68;
+}
+
+.pill {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  margin-right: 4px;
+  margin-top: 4px;
+}
+
+.pill.best {
+  background: #d7f5e7;
+  color: #10683f;
+}
+
+.pill.warn {
+  background: #fdebd3;
+  color: #8d5500;
+}
+
+.pill.active {
+  background: #dbe8ff;
+  color: #1146a3;
+}
+
+.map-panel {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#map {
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 980px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+
+  .controls {
+    height: auto;
+    overflow: visible;
+  }
+
+  .map-panel {
+    position: relative;
+    height: auto;
+    overflow: visible;
+  }
+
+  #map {
+    height: 58vh;
+  }
+}

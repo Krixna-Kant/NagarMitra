@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.routes.aqi import router as aqi_router
+from app.routes.routes import router as routes_router
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -38,13 +39,19 @@ app = FastAPI(
 # CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://nagarmitra.vercel.app"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5500",
+        "https://nagarmitra.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(aqi_router)
+app.include_router(routes_router)
 
 
 @app.get("/")
@@ -60,6 +67,8 @@ async def root():
             "all_wards":       "/api/v1/aqi/wards/all",
             "dashboard":       "/api/v1/aqi/dashboard",
             "list_wards":      "/api/v1/aqi/wards",
+            "routes_config":   "/api/v1/routes/config",
+            "compare_routes":  "/api/v1/routes/compare",
         }
     }
 

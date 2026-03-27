@@ -41,5 +41,20 @@ def run_tests():
     else:
         print(f"❌ FAILED: {res.text}")
 
+    # 4. Test RAG / AI Consultant
+    print("\n[4] Testing Groq AI Consultant:")
+    consult_payload = {
+        "query": "According to the WHO or TERI, what are the most effective short-term policies to reduce PM2.5 in a densely populated urban area during winter?",
+        "context_ward": "Anand Vihar"
+    }
+    res = client.post("/api/v1/admin/ai/consult", json=consult_payload)
+    if res.status_code == 200:
+        print("✅ SUCCESS")
+        data = res.json()
+        print(f"Ward Context Used: {data.get('ward_context_used')}")
+        print(data.get("ai_response"))
+    else:
+        print(f"❌ FAILED: {res.text}")
+
 if __name__ == "__main__":
     run_tests()

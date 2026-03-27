@@ -61,3 +61,28 @@ async def get_actionable_policies(source_classification: str):
         "total_recommendations": len(policies),
         "actionable_policies": policies
     }
+
+class ConsultantRequest(BaseModel):
+    query: str
+    context_ward: str = None
+
+@router.post("/ai/consult")
+async def ask_ai_consultant(request: ConsultantRequest):
+    """
+    **AI Research Consultant**: Pings Groq to provide actionable scientific answers and research summaries based on the admin's query.
+    """
+    from app.services.ai_consultant import get_research_consultation
+    
+    ward_context = None
+    if request.context_ward:
+        # Optionally hook into live data if a ward is specified
+        stations = await fetch_aqicn_all_delhi_stations()
+        if stations:
+            ward_context = get_ward_aqi(request.context_ward, stations)
+            
+    answer = get_research_consultation(request.query, ward_data=ward_context)
+    return {
+        "query": request.query,
+        "ward_context_used": bool(ward_context),
+        "ai_response": answer
+    }

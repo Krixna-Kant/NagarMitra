@@ -9,7 +9,8 @@ import logging
 
 from app.services.aqi_fetcher      import (fetch_cpcb_delhi, fetch_aqicn_all_delhi_stations,
                                              fetch_weather_delhi, get_cpcb_station_aqi)
-from app.services.ward_mapper       import get_ward_aqi, get_all_wards_aqi, WARD_CENTROIDS
+from app.services.ward_mapper       import (get_ward_aqi, get_all_wards_aqi, WARD_CENTROIDS,
+                                             get_interpolated_pollutants, WARD_PROFILES)
 from app.services.attribution_engine import attribute_pollution_sources
 from app.services.advisory_engine  import get_health_advisory, get_bulk_advisories
 
@@ -79,13 +80,9 @@ async def get_ward_aqi_endpoint(
         })
 
     # Attribution (why is AQI high?)
-    # Get pollutants from nearest station for better attribution
-    nearest_station_data = None
-    for s in stations:
-        if s.get("station") == ward_data.get("nearest_station"):
-            nearest_station_data = s
-            break
-    pollutants = nearest_station_data.get("pollutants", {}) if nearest_station_data else {}
+    # NEW: Interpolated Chemical Mesh (Instead of nearest station)
+    pollutants  = get_interpolated_pollutants(ward_data["latitude"], ward_data["longitude"], stations)
+    ward_type   = WARD_PROFILES.get(ward_name, "general")
 
     attribution = attribute_pollution_sources(
         aqi       = ward_data.get("aqi"),
@@ -93,6 +90,8 @@ async def get_ward_aqi_endpoint(
         weather   = weather,
         ward_name = ward_name,
     )
+    # Add metadata
+    attribution["ward_type"] = ward_type
 
     # Health advisory
     advisory = get_health_advisory(

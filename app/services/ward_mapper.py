@@ -79,6 +79,29 @@ WARD_CENTROIDS = {
     "Wazirpur":            (28.7050, 77.1637),
 }
 
+# ─── Ward Land-Use Profiles ───────────────────────────────────────────────────
+
+WARD_PROFILES = {
+    "Okhla":           "industrial",
+    "Bawana":          "industrial",
+    "Wazirpur":        "industrial",
+    "Jahangirpuri":    "industrial",
+    "Mundka":          "industrial",
+    "Narela":          "industrial",
+    "Patparganj":      "industrial",
+    "Anand Vihar":     "traffic_hub",
+    "ITO":             "traffic_hub",
+    "Connaught Place": "traffic_hub",
+    "Karol Bagh":      "traffic_hub",
+    "Punjabi Bagh":    "traffic_hub",
+    "Rajouri Garden":  "traffic_hub",
+    "Uttam Nagar":     "traffic_hub",
+    "Seemapuri":       "biomass_sensitive",
+    "Alipur":          "biomass_sensitive",
+    "Burari":          "biomass_sensitive",
+    "Sonia Vihar":     "biomass_sensitive",
+}
+
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Compute distance in km between two lat/lon points."""
@@ -145,6 +168,7 @@ def get_ward_aqi(ward_name: str, station_readings: list[dict]) -> dict:
 
     # Find nearest actual station
     nearest = _find_nearest_station(lat, lon, station_readings)
+    dist_km = haversine_km(lat, lon, nearest.get("latitude"), nearest.get("longitude")) if nearest else 0.0
 
     return {
         "ward":           ward_name,
@@ -156,8 +180,37 @@ def get_ward_aqi(ward_name: str, station_readings: list[dict]) -> dict:
         "health_impact":  health_impact,
         "nearest_station": nearest.get("station") if nearest else None,
         "nearest_aqi":    nearest.get("aqi") if nearest else None,
+        "distance_km":    round(dist_km, 2),
         "method":         "IDW_interpolation",
     }
+
+
+def get_interpolated_pollutants(lat: float, lon: float, stations: list[dict]) -> dict:
+    """
+    Interpolate every pollutant key using IDW to create a unique chemical signature.
+    """
+    keys = ["PM2.5", "PM10", "NO2", "SO2", "CO"]
+    pollutants = {}
+
+    for key in keys:
+        # Create a reading list for this specific key
+        readings = []
+        for s in stations:
+            val = s.get("pollutants", {}).get(key)
+            if val is not None:
+                # Add location to the reading for IDW
+                readings.append({
+                    "aqi": float(val.get("avg") if isinstance(val, dict) else val),
+                    "latitude": s.get("latitude"),
+                    "longitude": s.get("longitude")
+                })
+        
+        if readings:
+            pollutants[key] = idw_interpolate(lat, lon, readings, power=2)
+        else:
+            pollutants[key] = None
+
+    return pollutants
 
 
 def get_all_wards_aqi(station_readings: list[dict]) -> list[dict]:

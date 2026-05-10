@@ -57,6 +57,16 @@ def attribute_pollution_sources(
     trapping_score = _trapping_score(wind_speed, humidity)
     scores["weather_trapping"] = trapping_score
 
+    # 6. Ward Profile Offsets (Land-use context)
+    ward_type = _get_ward_type(ward_name)
+    if ward_type == "industrial":
+        scores["industrial"] = scores.get("industrial", 0) + 0.25
+        scores["dust_construction"] += 0.1
+    elif ward_type == "traffic_hub":
+        scores["traffic"] += 0.3
+    elif ward_type == "biomass_sensitive":
+        scores["biomass_burning"] += 0.25
+
     # Normalize to percentages
     total = sum(scores.values())
     percentages = {k: round((v / total) * 100, 1) if total > 0 else 0
@@ -233,12 +243,23 @@ def _confidence_score(scores: dict, aqi: float, pollutants: dict) -> str:
     """Return High/Medium/Low confidence based on data completeness."""
     has_key_pollutants = any(_get_avg(pollutants, k) for k in ["PM2.5", "PM10", "NO2"])
     max_score = max(scores.values()) if scores else 0
-    if has_key_pollutants and max_score > 0.5 and aqi > 100:
+    
+    # Lowered thresholds for better qualitative labels
+    if has_key_pollutants and max_score > 0.45:
         return "High"
-    elif has_key_pollutants and max_score > 0.3:
+    elif has_key_pollutants and max_score > 0.25:
         return "Medium"
     else:
         return "Low"
+
+def _get_ward_type(ward_name: str) -> str:
+    # This is a bit circular, but we can import from ward_mapper if needed
+    # Better: the caller passes it. For now, we use a simple dict or local import
+    try:
+        from app.services.ward_mapper import WARD_PROFILES
+        return WARD_PROFILES.get(ward_name, "general")
+    except ImportError:
+        return "general"
 
 
 # ─── Explanation Builders ─────────────────────────────────────────────────────
